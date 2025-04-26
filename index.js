@@ -5,7 +5,6 @@ class Seed {
         this.angle = angle;
         this.radius = radius; // distance from center of pit
         this.size = 8 * pit.game.ratio; // seed circle size
-        console.log(pit.game.ratio);
     }
 
     draw() {
@@ -56,6 +55,12 @@ class Pit {
         for (const seed of this.seeds) {
             seed.draw();
         } 
+
+        this.context.fillStyle = 'black';
+        this.context.font = `${12 * this.game.ratio}px Arial`;
+        this.context.textAlign = 'center';
+        this.context.textBaseline = 'middle';
+        this.context.fillText(this.seedCount, this.x, this.y);
     }  
 }
 
@@ -71,7 +76,58 @@ class Board {
         this.cols = 8;
         this.pits = [];
 
+        this.heldSeeds = 0;
+        this.isSowing = false;
+
+        this.mouseX = 0;
+        this.mouseY = 0;
+        this.trackMouse = false; // new flag
+        this.mouseMoveHandler = null; // store listener reference
+
+
         this.initPits();
+        this.initClickHandling();
+    }
+
+    startTrackingMouse(event = null) {
+        if (this.trackMouse) return;
+        this.trackMouse = true;
+
+        if (event) {
+            const rect = this.game.canvas.getBoundingClientRect();
+            this.mouseX = event.clientX - rect.left;
+            this.mouseY = event.clientY - rect.top;
+        }
+
+        this.mouseMoveHandler = (e) => {
+            const rect = this.game.canvas.getBoundingClientRect();
+            this.mouseX = e.clientX - rect.left;
+            this.mouseY = e.clientY - rect.top;
+        };
+        this.game.canvas.addEventListener('mousemove', this.mouseMoveHandler);
+    }
+
+    stopTrackingMouse() {
+        if (!this.trackMouse) return; // not tracking
+        this.trackMouse = false;
+        this.game.canvas.removeEventListener('mousemove', this.mouseMoveHandler);
+        this.mouseMoveHandler = null;
+    }
+
+    getLinearPits() {
+        return this.pits.flat();
+    }
+
+    getPitByIndex(index) {
+        const total = this.rows * this.cols;
+        const i = index % total;
+        const row = Math.floor(i / this.cols);
+        const col = i % this.cols;
+        return this.pits[row][col];
+    }
+
+    getIndex(row, col) {
+        return row * this.cols + col;
     }
 
     initPits() {
@@ -95,6 +151,80 @@ class Board {
         }
     }
 
+    initClickHandling() {
+        this.game.canvas.addEventListener('click', (event) => {
+            const rect = this.game.canvas.getBoundingClientRect();
+            const mouseX = event.clientX - rect.left;
+            const mouseY = event.clientY - rect.top;
+
+            // Update board's mouse coordinates immediately
+            this.mouseX = mouseX;
+            this.mouseY = mouseY;
+
+            for (let row = 0; row < this.rows; row++) {
+                for (let col = 0; col < this.cols; col++) {
+                    const pit = this.pits[row][col];
+                    const dx = mouseX - pit.x;
+                    const dy = mouseY - pit.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < pit.radius) {
+                        this.handlePitClick(pit, row, col, event);
+                        return;
+                    }
+                }
+            }
+        });
+    }
+
+    // sowFrom(pit, row, col) {
+    //     // Only allow sowing if the pit is in row 2 or 3
+    //     if (row < 2) return; // do nothing if clicked pit is in row 0 or 1
+
+    //     const seedsToSow = pit.seeds.length;
+    //     if (seedsToSow === 0) return;
+
+    //     pit.seeds = [];
+    //     pit.seedCount = 0;
+
+    //     const startIndex = this.getIndex(row, col);
+
+    //     for (let i = 1; i <= seedsToSow; i++) {
+    //         const nextIndex = (startIndex + i) % (this.rows * this.cols);
+    //         const targetPit = this.getPitByIndex(nextIndex);
+
+    //         // Only place seeds into pits in row 2 or 3
+    //         const targetRow = Math.floor(nextIndex / this.cols);
+    //         if (targetRow >= 2) {
+    //             targetPit.seedCount++;
+    //             targetPit.initSeeds(); // redraw seeds for this pit
+    //         }
+    //     }
+
+    //     this.game.render(); // refresh the canvas
+    // }
+
+    handlePitClick(pit, row, col) {
+        if (!this.isSowing) {
+            if (pit.seedCount > 0) {
+                this.heldSeeds = pit.seedCount;
+                pit.seedCount = 0;
+                pit.seeds = [];
+                this.isSowing = true;
+                this.startTrackingMouse(); // start tracking!
+            }
+        } else {
+            if (this.heldSeeds > 0) {
+                pit.seedCount++;
+                pit.initSeeds();
+                this.heldSeeds--;
+
+                if (this.heldSeeds === 0) {
+                    this.isSowing = false;
+                    this.stopTrackingMouse(); // stop tracking!
+                }
+            }
+        }
+    }
+
     draw() {
         // draw board background
         this.game.context.fillStyle = 'gray';
@@ -105,6 +235,24 @@ class Board {
             for (let col = 0; col < this.cols; col++) {
                 this.pits[row][col].draw();
             }
+        }
+
+        // draw held seeds following the mouse
+    if (this.isSowing && this.heldSeeds > 0) {
+            const ctx = this.game.context;
+            ctx.beginPath();
+            ctx.arc(this.mouseX, this.mouseY, 12 * this.game.ratio, 0, Math.PI * 2);
+            ctx.fillStyle = 'brown';
+            ctx.fill();
+            ctx.strokeStyle = 'black';
+            ctx.stroke();
+
+            // optional: draw number of held seeds
+            ctx.fillStyle = 'white';
+            ctx.font = `${14 * this.game.ratio}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(this.heldSeeds, this.mouseX, this.mouseY);
         }
     }
 }
@@ -123,12 +271,23 @@ class Game {
         this.ratioH = this.baseHeight / this.height;
         this.ratioW = this.baseWidth / this.width;
         this.ratio = this.ratioH;
-        console.log(this.ratioH);
+        // console.log(this.ratioH);
 
         this.board = new Board (this);
+        this.start(); // start the game loop
+    }
+
+    start() {
+        this.loop(); // begin render loop
+    }
+
+    loop() {
+        this.render();
+        requestAnimationFrame(() => this.loop());
     }
 
     render(context) {
+        this.context.clearRect(0, 0, this.width, this.height);
         this.board.draw();
     }
 }
