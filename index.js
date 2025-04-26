@@ -29,6 +29,9 @@ class Pit {
         this.radius = 64 * this.game.ratio; // dynamically scaled
 
         this.seedCount = 2;
+        this.isFlashing = false;
+        this.flashTimer = 0;
+
         this.initSeeds(); 
     }
 
@@ -43,25 +46,33 @@ class Pit {
         }
     }
 
-    draw() {
-        this.context.beginPath(); 
-        this.context.arc(this.x, this.y, this.radius, 0, Math.PI * 2); 
-        this.context.fillStyle = 'orange'; 
-        this.context.fill(); 
-        this.context.strokeStyle = 'black'; 
+   draw() {
+        this.context.beginPath();
+        this.context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+
+        if (this.isFlashing) {
+            this.context.fillStyle = 'gold'; // flashing color
+        } else {
+            this.context.fillStyle = 'orange'; // normal color
+        }
+
+        this.context.fill();
+        this.context.strokeStyle = 'black';
         this.context.stroke();
 
-         // draw the seeds
+        // Draw seeds
         for (const seed of this.seeds) {
             seed.draw();
-        } 
+        }
 
+        // Draw seed count text
         this.context.fillStyle = 'black';
         this.context.font = `${12 * this.game.ratio}px Arial`;
         this.context.textAlign = 'center';
         this.context.textBaseline = 'middle';
         this.context.fillText(this.seedCount, this.x, this.y);
-    }  
+    }
+ 
 }
 
 class Board {
@@ -87,6 +98,11 @@ class Board {
 
         this.initPits();
         this.initClickHandling();
+    }
+
+    flashPit(pit) {
+        pit.isFlashing = true;
+        pit.flashTimer = 10; // number of frames to stay flashing (adjust for longer/shorter flash)
     }
 
     startTrackingMouse(event = null) {
@@ -175,56 +191,74 @@ class Board {
         });
     }
 
-    // sowFrom(pit, row, col) {
-    //     // Only allow sowing if the pit is in row 2 or 3
-    //     if (row < 2) return; // do nothing if clicked pit is in row 0 or 1
-
-    //     const seedsToSow = pit.seeds.length;
-    //     if (seedsToSow === 0) return;
-
-    //     pit.seeds = [];
-    //     pit.seedCount = 0;
-
-    //     const startIndex = this.getIndex(row, col);
-
-    //     for (let i = 1; i <= seedsToSow; i++) {
-    //         const nextIndex = (startIndex + i) % (this.rows * this.cols);
-    //         const targetPit = this.getPitByIndex(nextIndex);
-
-    //         // Only place seeds into pits in row 2 or 3
-    //         const targetRow = Math.floor(nextIndex / this.cols);
-    //         if (targetRow >= 2) {
-    //             targetPit.seedCount++;
-    //             targetPit.initSeeds(); // redraw seeds for this pit
-    //         }
-    //     }
-
-    //     this.game.render(); // refresh the canvas
-    // }
-
-    handlePitClick(pit, row, col) {
+    handlePitClick(pit, row, col, event) {
         if (!this.isSowing) {
-            if (pit.seedCount > 0) {
+            // Pickup phase
+            if (pit.seedCount > 1) {
                 this.heldSeeds = pit.seedCount;
                 pit.seedCount = 0;
                 pit.seeds = [];
+                this.flashPit(pit);
                 this.isSowing = true;
-                this.startTrackingMouse(); // start tracking!
+                this.startTrackingMouse(event);
             }
         } else {
+            // Sowing phase
             if (this.heldSeeds > 0) {
                 pit.seedCount++;
                 pit.initSeeds();
                 this.heldSeeds--;
 
                 if (this.heldSeeds === 0) {
-                    this.isSowing = false;
-                    this.stopTrackingMouse(); // stop tracking!
+                    // Check after dropping the last seed
+                    if (pit.seedCount > 1) {
+                        // Auto pick up from this pit
+                        this.heldSeeds = pit.seedCount;
+                        pit.seedCount = 0;
+                        pit.seeds = [];
+                        this.flashPit(pit);
+                        // No need to change isSowing or mouse tracking
+                        // because we are still sowing
+                    } else {
+                        // Done sowing normally
+                        this.isSowing = false;
+                        this.stopTrackingMouse();
+                    }
                 }
             }
         }
     }
 
+    // draw() {
+    //     // draw board background
+    //     this.game.context.fillStyle = 'gray';
+    //     this.game.context.fillRect(this.x, this.y, this.width, this.height);
+
+    //     // draw pits
+    //     for (let row = 0; row < this.rows; row++) {
+    //         for (let col = 0; col < this.cols; col++) {
+    //             this.pits[row][col].draw();
+    //         }
+    //     }
+
+    //     // draw held seeds following the mouse
+    // if (this.isSowing && this.heldSeeds > 0) {
+    //         const ctx = this.game.context;
+    //         ctx.beginPath();
+    //         ctx.arc(this.mouseX, this.mouseY, 12 * this.game.ratio, 0, Math.PI * 2);
+    //         ctx.fillStyle = 'brown';
+    //         ctx.fill();
+    //         ctx.strokeStyle = 'black';
+    //         ctx.stroke();
+
+    //         // optional: draw number of held seeds
+    //         ctx.fillStyle = 'white';
+    //         ctx.font = `${14 * this.game.ratio}px Arial`;
+    //         ctx.textAlign = 'center';
+    //         ctx.textBaseline = 'middle';
+    //         ctx.fillText(this.heldSeeds, this.mouseX, this.mouseY);
+    //     }
+    // }
     draw() {
         // draw board background
         this.game.context.fillStyle = 'gray';
@@ -233,12 +267,21 @@ class Board {
         // draw pits
         for (let row = 0; row < this.rows; row++) {
             for (let col = 0; col < this.cols; col++) {
-                this.pits[row][col].draw();
+                const pit = this.pits[row][col];
+                pit.draw();
+
+                // Update flashing animation
+                if (pit.isFlashing) {
+                    pit.flashTimer--;
+                    if (pit.flashTimer <= 0) {
+                        pit.isFlashing = false; // stop flashing after timer ends
+                    }
+                }
             }
         }
 
-        // draw held seeds following the mouse
-    if (this.isSowing && this.heldSeeds > 0) {
+        // Draw held seeds following the mouse
+        if (this.isSowing && this.heldSeeds > 0) {
             const ctx = this.game.context;
             ctx.beginPath();
             ctx.arc(this.mouseX, this.mouseY, 12 * this.game.ratio, 0, Math.PI * 2);
@@ -247,7 +290,6 @@ class Board {
             ctx.strokeStyle = 'black';
             ctx.stroke();
 
-            // optional: draw number of held seeds
             ctx.fillStyle = 'white';
             ctx.font = `${14 * this.game.ratio}px Arial`;
             ctx.textAlign = 'center';
