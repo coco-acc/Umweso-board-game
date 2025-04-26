@@ -21,16 +21,18 @@ class Seed {
 }
 
 class Pit {
-    constructor(game, x, y) {
+    constructor(game, x, y, owner) {
         this.game = game;
         this.context = game.context;
         this.x = x;
         this.y = y;
+        this.owner = owner; // new line! 'player' or 'opponent'
         this.radius = 64 * this.game.ratio; // dynamically scaled
 
         this.seedCount = 2;
         this.isFlashing = false;
         this.flashTimer = 0;
+
 
         this.initSeeds(); 
     }
@@ -94,7 +96,7 @@ class Board {
         this.mouseY = 0;
         this.trackMouse = false; // new flag
         this.mouseMoveHandler = null; // store listener reference
-
+        this.currentPitIndex = null; // track which pit you're sowing into
 
         this.initPits();
         this.initClickHandling();
@@ -161,7 +163,11 @@ class Board {
                 if (row >= 2) yOffset += extraGap;
 
                 const y = this.y + yOffset + basePitSpacingY / 1.8;
-                const pit = new Pit(this.game, x, y);
+
+                // Determine owner
+                let owner = (row <= 1) ? "opponent" : "player";
+
+                const pit = new Pit(this.game, x, y, owner);
                 this.pits[row][col] = pit;
             }
         }
@@ -194,17 +200,19 @@ class Board {
     handlePitClick(pit, row, col, event) {
         if (!this.isSowing) {
             // Pickup phase
-            if (pit.seedCount > 1) {
+            if (pit.owner === "player" && pit.seedCount > 1) {
+                // Now pickup only allowed if pit belongs to player
                 this.heldSeeds = pit.seedCount;
                 pit.seedCount = 0;
                 pit.seeds = [];
                 this.flashPit(pit);
                 this.isSowing = true;
                 this.startTrackingMouse(event);
+                this.currentPitIndex = this.getIndex(row, col);
             }
         } else {
             // Sowing phase
-            if (this.heldSeeds > 0) {
+            if (this.heldSeeds > 0 && pit.owner === "player") {
                 pit.seedCount++;
                 pit.initSeeds();
                 this.heldSeeds--;
@@ -229,36 +237,6 @@ class Board {
         }
     }
 
-    // draw() {
-    //     // draw board background
-    //     this.game.context.fillStyle = 'gray';
-    //     this.game.context.fillRect(this.x, this.y, this.width, this.height);
-
-    //     // draw pits
-    //     for (let row = 0; row < this.rows; row++) {
-    //         for (let col = 0; col < this.cols; col++) {
-    //             this.pits[row][col].draw();
-    //         }
-    //     }
-
-    //     // draw held seeds following the mouse
-    // if (this.isSowing && this.heldSeeds > 0) {
-    //         const ctx = this.game.context;
-    //         ctx.beginPath();
-    //         ctx.arc(this.mouseX, this.mouseY, 12 * this.game.ratio, 0, Math.PI * 2);
-    //         ctx.fillStyle = 'brown';
-    //         ctx.fill();
-    //         ctx.strokeStyle = 'black';
-    //         ctx.stroke();
-
-    //         // optional: draw number of held seeds
-    //         ctx.fillStyle = 'white';
-    //         ctx.font = `${14 * this.game.ratio}px Arial`;
-    //         ctx.textAlign = 'center';
-    //         ctx.textBaseline = 'middle';
-    //         ctx.fillText(this.heldSeeds, this.mouseX, this.mouseY);
-    //     }
-    // }
     draw() {
         // draw board background
         this.game.context.fillStyle = 'gray';
