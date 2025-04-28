@@ -40,7 +40,7 @@ class Pit {
     initSeeds() {
         this.seeds = [];
         const angleStep = (Math.PI * 2) / this.seedCount;
-        const seedRingRadius = this.radius / 4;
+        const seedRingRadius = this.radius / 2.4;
 
         for (let i = 0; i < this.seedCount; i++) {
             const angle = i * angleStep;
@@ -53,7 +53,7 @@ class Pit {
         this.context.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
 
         if (this.isFlashing) {
-            this.context.fillStyle = 'gold'; // flashing color
+            this.context.fillStyle = this.flashColor || 'gold'; // use stored flash color
         } else {
             this.context.fillStyle = 'orange'; // normal color
         }
@@ -97,14 +97,22 @@ class Board {
         this.trackMouse = false; // new flag
         this.mouseMoveHandler = null; // store listener reference
         this.currentPitIndex = null; // track which pit you're sowing into
+        this.originPit = null; 
+        this.isManualPickup = false;
+        this.expectedPitIndex = null; // during sowing, the next correct pit index
 
         this.initPits();
         this.initClickHandling();
     }
 
-    flashPit(pit) {
+    // flashPit(pit) {
+    //     pit.isFlashing = true;
+    //     pit.flashTimer = 10; // number of frames to stay flashing (adjust for longer/shorter flash)
+    // }
+    flashPit(pit, color = 'gold') {
         pit.isFlashing = true;
-        pit.flashTimer = 10; // number of frames to stay flashing (adjust for longer/shorter flash)
+        pit.flashTimer = 10; // number of frames to stay flashing
+        pit.flashColor = color; // store the flash color
     }
 
     startTrackingMouse(event = null) {
@@ -132,20 +140,55 @@ class Board {
         this.mouseMoveHandler = null;
     }
 
+    // getLinearPits() {
+    //     return this.pits.flat();
+    // }
     getLinearPits() {
-        return this.pits.flat();
+        const linearPits = [];
+
+        // Row 3: left to right
+        for (let col = 0; col < this.cols; col++) {
+            linearPits.push(this.pits[3][col]);
+        }
+
+        // Row 2: right to left
+        for (let col = this.cols - 1; col >= 0; col--) {
+            linearPits.push(this.pits[2][col]);
+        }
+
+        // Row 1: left to right
+        for (let col = 0; col < this.cols; col++) {
+            linearPits.push(this.pits[1][col]);
+        }
+
+        // Row 0: right to left
+        for (let col = this.cols - 1; col >= 0; col--) {
+            linearPits.push(this.pits[0][col]);
+        }
+
+        return linearPits;
     }
 
+
+    // getPitByIndex(index) {
+    //     const total = this.rows * this.cols;
+    //     const i = index % total;
+    //     const row = Math.floor(i / this.cols);
+    //     const col = i % this.cols;
+    //     return this.pits[row][col];
+    // }
     getPitByIndex(index) {
-        const total = this.rows * this.cols;
-        const i = index % total;
-        const row = Math.floor(i / this.cols);
-        const col = i % this.cols;
-        return this.pits[row][col];
+        const pits = this.getLinearPits();
+        const total = pits.length;
+        return pits[index % total];
     }
 
-    getIndex(row, col) {
-        return row * this.cols + col;
+    // getIndex(row, col) {
+    //     return row * this.cols + col;
+    // }
+    getIndex(pit) {
+        const pits = this.getLinearPits();
+        return pits.indexOf(pit);
     }
 
     initPits() {
@@ -173,69 +216,222 @@ class Board {
         }
     }
 
+    // initClickHandling() {
+    //     this.game.canvas.addEventListener('click', (event) => {
+    //         const rect = this.game.canvas.getBoundingClientRect();
+    //         const mouseX = event.clientX - rect.left;
+    //         const mouseY = event.clientY - rect.top;
+
+    //         // Update board's mouse coordinates immediately
+    //         this.mouseX = mouseX;
+    //         this.mouseY = mouseY;
+
+    //         for (let row = 0; row < this.rows; row++) {
+    //             for (let col = 0; col < this.cols; col++) {
+    //                 const pit = this.pits[row][col];
+    //                 const dx = mouseX - pit.x;
+    //                 const dy = mouseY - pit.y;
+    //                 if (Math.sqrt(dx * dx + dy * dy) < pit.radius) {
+    //                     this.handlePitClick(pit, row, col, event);
+    //                     return;
+    //                 }
+    //             }
+    //         }
+    //     });
+    // }
     initClickHandling() {
         this.game.canvas.addEventListener('click', (event) => {
-            const rect = this.game.canvas.getBoundingClientRect();
-            const mouseX = event.clientX - rect.left;
-            const mouseY = event.clientY - rect.top;
-
-            // Update board's mouse coordinates immediately
-            this.mouseX = mouseX;
-            this.mouseY = mouseY;
-
-            for (let row = 0; row < this.rows; row++) {
-                for (let col = 0; col < this.cols; col++) {
-                    const pit = this.pits[row][col];
-                    const dx = mouseX - pit.x;
-                    const dy = mouseY - pit.y;
-                    if (Math.sqrt(dx * dx + dy * dy) < pit.radius) {
-                        this.handlePitClick(pit, row, col, event);
-                        return;
-                    }
-                }
-            }
+            this.handleClick(event, false);
+        });
+        this.game.canvas.addEventListener('dblclick', (event) => {
+            this.handleClick(event, true);
         });
     }
 
-    handlePitClick(pit, row, col, event) {
-        if (!this.isSowing) {
-            // Pickup phase
-            if (pit.owner === "player" && pit.seedCount > 1) {
-                // Now pickup only allowed if pit belongs to player
-                this.heldSeeds = pit.seedCount;
-                pit.seedCount = 0;
-                pit.seeds = [];
-                this.flashPit(pit);
-                this.isSowing = true;
-                this.startTrackingMouse(event);
-                this.currentPitIndex = this.getIndex(row, col);
+    handleClick(event, isDoubleClick) {
+        const rect = this.game.canvas.getBoundingClientRect();
+        const mouseX = event.clientX - rect.left;
+        const mouseY = event.clientY - rect.top;
+
+        this.mouseX = mouseX;
+        this.mouseY = mouseY;
+
+        for (let row = 0; row < this.rows; row++) {
+            for (let col = 0; col < this.cols; col++) {
+                const pit = this.pits[row][col];
+                const dx = mouseX - pit.x;
+                const dy = mouseY - pit.y;
+                if (Math.sqrt(dx * dx + dy * dy) < pit.radius) {
+                    this.handlePitClick(pit, row, col, event, isDoubleClick);
+                    return;
+                }
             }
-        } else {
-            // Sowing phase
-            if (this.heldSeeds > 0 && pit.owner === "player") {
+        }
+    }
+
+
+    // handlePitClick(pit, row, col, event) {
+    //     if (!this.isSowing) {
+    //         // Pickup phase
+    //         if (pit.owner === "player" && pit.seedCount > 1) {
+    //             // Now pickup only allowed if pit belongs to player
+    //             this.heldSeeds = pit.seedCount;
+    //             pit.seedCount = 0;
+    //             pit.seeds = [];
+    //             this.flashPit(pit);
+    //             this.isSowing = true;
+    //             this.startTrackingMouse(event);
+    //             this.currentPitIndex = this.getIndex(row, col);
+    //         }
+    //     } else {
+    //         // Sowing phase
+    //         if (this.heldSeeds > 0 && pit.owner === "player") {
+    //             pit.seedCount++;
+    //             pit.initSeeds();
+    //             this.heldSeeds--;
+
+    //             if (this.heldSeeds === 0) {
+    //                 // Check after dropping the last seed
+    //                 if (pit.seedCount > 1) {
+    //                     // Auto pick up from this pit
+    //                     this.heldSeeds = pit.seedCount;
+    //                     pit.seedCount = 0;
+    //                     pit.seeds = [];
+    //                     this.flashPit(pit);
+    //                     // No need to change isSowing or mouse tracking
+    //                     // because we are still sowing
+    //                 } else {
+    //                     // Done sowing normally
+    //                     this.isSowing = false;
+    //                     this.stopTrackingMouse();
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+   handlePitClick(pit, row, col, event, isDoubleClick) {
+    if (!this.isSowing) {
+        // Pickup phase
+        if (!isDoubleClick && pit.owner === "player" && pit.seedCount > 1) {
+            this.heldSeeds = pit.seedCount;
+            pit.seedCount = 0;
+            pit.seeds = [];
+            this.flashPit(pit, 'white');
+            this.isSowing = true;
+            this.startTrackingMouse(event);
+            this.currentPitIndex = this.getIndex(pit);
+            this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16
+            //(this.rows * this.cols); // anti-clockwise (decrement index)
+
+            this.originPit = pit;
+            this.isManualPickup = true;
+        }
+    } else {
+        // Sowing phase
+        if (isDoubleClick) {
+            // Double-click during sowing
+            if (this.isManualPickup && this.originPit) {
+                // Double-click cancel
+                this.originPit.seedCount += this.heldSeeds;
+                this.originPit.initSeeds();
+                this.heldSeeds = 0;
+                this.isSowing = false;
+                this.stopTrackingMouse();
+                this.originPit = null;
+                this.isManualPickup = false;
+            } else if (pit === this.originPit) {
+                // Special case: double-click sow into origin pit
                 pit.seedCount++;
                 pit.initSeeds();
                 this.heldSeeds--;
 
                 if (this.heldSeeds === 0) {
-                    // Check after dropping the last seed
                     if (pit.seedCount > 1) {
-                        // Auto pick up from this pit
                         this.heldSeeds = pit.seedCount;
                         pit.seedCount = 0;
                         pit.seeds = [];
                         this.flashPit(pit);
-                        // No need to change isSowing or mouse tracking
-                        // because we are still sowing
+                        this.originPit = pit; // New origin if re-pickup
+                        this.isManualPickup = false; // now automatic pickup
                     } else {
-                        // Done sowing normally
                         this.isSowing = false;
                         this.stopTrackingMouse();
+                        this.originPit = null;
+                        this.isManualPickup = false;
+                    }
+                }
+            }
+        } else {
+            // // Single-click during sowing
+            // if (pit === this.originPit) {
+            //     // Prevent sowing into the original pit on single click
+            //     return;
+            // }
+            // if (this.heldSeeds > 0 && pit.owner === "player") {
+            //     pit.seedCount++;
+            //     pit.initSeeds();
+            //     this.heldSeeds--;
+
+            //     if (this.heldSeeds === 0) {
+            //         if (pit.seedCount > 1) {
+            //             this.heldSeeds = pit.seedCount;
+            //             pit.seedCount = 0;
+            //             pit.seeds = [];
+            //             this.flashPit(pit);
+            //             this.originPit = pit; // New origin if re-pickup
+            //             this.isManualPickup = false; // automatic pickup
+            //         } else {
+            //             this.isSowing = false;
+            //             this.stopTrackingMouse();
+            //             this.originPit = null;
+            //             this.isManualPickup = false;
+            //         }
+            //     }
+                // Single-click during sowing
+                // if (pit === this.originPit) {
+                //     return; // Prevent single-click sow into original pit
+                // }
+
+                // Check if correct pit (anti-clockwise move)
+                const clickedPitIndex = this.getIndex(pit);
+                if (clickedPitIndex !== this.expectedPitIndex) {
+                    return; // clicked wrong pit, do nothing
+                }
+
+                // Correct pit, proceed to sow
+                if (this.heldSeeds > 0 && pit.owner === "player") {
+                    pit.seedCount++;
+                    pit.initSeeds();
+                    this.heldSeeds--;
+
+                    if (this.heldSeeds === 0) {
+                        if (pit.seedCount > 1) {
+                            this.heldSeeds = pit.seedCount;
+                            pit.seedCount = 0;
+                            pit.seeds = [];
+                            this.flashPit(pit);
+                            this.originPit = pit; // New origin if re-pickup
+                            this.isManualPickup = false;
+                            this.currentPitIndex = clickedPitIndex;
+                            this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
+                        } else {
+                            this.isSowing = false;
+                            this.stopTrackingMouse();
+                            this.originPit = null;
+                            this.isManualPickup = false;
+                            this.currentPitIndex = null;
+                            this.expectedPitIndex = null;
+                        }
+                    } else {
+                        // Update expected pit normally
+                        this.expectedPitIndex = (clickedPitIndex + 1 + this.rows * this.cols) % 16;
                     }
                 }
             }
         }
     }
+
+
 
     draw() {
         // draw board background
