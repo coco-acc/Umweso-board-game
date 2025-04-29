@@ -77,6 +77,43 @@ class Pit {
  
 }
 
+class FlyingSeed {
+    constructor(startX, startY, endX, endY, game) {
+        this.startX = startX;
+        this.startY = startY;
+        this.endX = endX;
+        this.endY = endY;
+        this.game = game;
+
+        this.x = startX;
+        this.y = startY;
+        this.progress = 0; // progress from 0 to 1
+        this.speed = 0.02; // controls flying speed
+    }
+
+    update() {
+        this.progress += this.speed;
+        if (this.progress > 1) this.progress = 1;
+
+        this.x = this.startX * (1 - this.progress) + this.endX * this.progress;
+        this.y = this.startY * (1 - this.progress) + this.endY * this.progress;
+    }
+
+    draw(context) {
+        context.beginPath();
+        context.arc(this.x, this.y, 6 * this.game.ratio, 0, Math.PI * 2);
+        context.fillStyle = 'gold';
+        context.fill();
+        context.strokeStyle = 'black';
+        context.stroke();
+    }
+
+    isFinished() {
+        return this.progress >= 1;
+    }
+}
+
+
 class Board {
     constructor(game) {
         this.game = game;
@@ -100,29 +137,50 @@ class Board {
         this.originPit = null; 
         this.isManualPickup = false;
         this.expectedPitIndex = null; // during sowing, the next correct pit index
+        this.pendingSowFromCaptureOrigin = null; // stores the origin pit of the capture
 
         this.initPits();
         this.initClickHandling();
+        this.flyingSeeds = []; // for flying captured seeds
+
     }
 
-    // flashPit(pit) {
-    //     pit.isFlashing = true;
-    //     pit.flashTimer = 10; // number of frames to stay flashing (adjust for longer/shorter flash)
-    // }
     flashPit(pit, color = 'gold') {
         pit.isFlashing = true;
-        pit.flashTimer = 10; // number of frames to stay flashing
+        pit.flashTimer = 20; // number of frames to stay flashing
         pit.flashColor = color; // store the flash color
     }
 
+    // startTrackingMouse(event = null) {
+    //     if (this.trackMouse) return;
+    //     this.trackMouse = true;
+
+    //     if (event) {
+    //         const rect = this.game.canvas.getBoundingClientRect();
+    //         this.mouseX = event.clientX - rect.left;
+    //         this.mouseY = event.clientY - rect.top;
+    //     }
+
+    //     this.mouseMoveHandler = (e) => {
+    //         const rect = this.game.canvas.getBoundingClientRect();
+    //         this.mouseX = e.clientX - rect.left;
+    //         this.mouseY = e.clientY - rect.top;
+    //     };
+    //     this.game.canvas.addEventListener('mousemove', this.mouseMoveHandler);
+    // }
     startTrackingMouse(event = null) {
         if (this.trackMouse) return;
         this.trackMouse = true;
 
+        const rect = this.game.canvas.getBoundingClientRect();
+
         if (event) {
-            const rect = this.game.canvas.getBoundingClientRect();
             this.mouseX = event.clientX - rect.left;
             this.mouseY = event.clientY - rect.top;
+        } else if (this.originPit) {
+            // fallback if event is null (e.g. post-capture resume)
+            this.mouseX = this.originPit.x - rect.left;
+            this.mouseY = this.originPit.y - rect.top;
         }
 
         this.mouseMoveHandler = (e) => {
@@ -140,9 +198,6 @@ class Board {
         this.mouseMoveHandler = null;
     }
 
-    // getLinearPits() {
-    //     return this.pits.flat();
-    // }
     getLinearPits() {
         const linearPits = [];
 
@@ -169,26 +224,32 @@ class Board {
         return linearPits;
     }
 
-
-    // getPitByIndex(index) {
-    //     const total = this.rows * this.cols;
-    //     const i = index % total;
-    //     const row = Math.floor(i / this.cols);
-    //     const col = i % this.cols;
-    //     return this.pits[row][col];
-    // }
     getPitByIndex(index) {
         const pits = this.getLinearPits();
         const total = pits.length;
         return pits[index % total];
     }
 
-    // getIndex(row, col) {
-    //     return row * this.cols + col;
-    // }
     getIndex(pit) {
         const pits = this.getLinearPits();
         return pits.indexOf(pit);
+    }
+
+    getRowFromIndex(index) {
+        // Based on your anti-clockwise order in getLinearPits()
+        if (index >= 0 && index <= 7) return 3;  // bottom row
+        if (index >= 8 && index <= 15) return 2;
+        if (index >= 16 && index <= 23) return 1;
+        if (index >= 24 && index <= 31) return 0;
+        return -1; // error
+    }
+
+    getColFromIndex(index) {
+        if (index >= 0 && index <= 7) return index;
+        if (index >= 8 && index <= 15) return 15 - index; // because row 2 is right to left
+        if (index >= 16 && index <= 23) return index - 16;
+        if (index >= 24 && index <= 31) return 31 - index; // because row 0 is right to left
+        return -1; // error
     }
 
     initPits() {
@@ -216,29 +277,6 @@ class Board {
         }
     }
 
-    // initClickHandling() {
-    //     this.game.canvas.addEventListener('click', (event) => {
-    //         const rect = this.game.canvas.getBoundingClientRect();
-    //         const mouseX = event.clientX - rect.left;
-    //         const mouseY = event.clientY - rect.top;
-
-    //         // Update board's mouse coordinates immediately
-    //         this.mouseX = mouseX;
-    //         this.mouseY = mouseY;
-
-    //         for (let row = 0; row < this.rows; row++) {
-    //             for (let col = 0; col < this.cols; col++) {
-    //                 const pit = this.pits[row][col];
-    //                 const dx = mouseX - pit.x;
-    //                 const dy = mouseY - pit.y;
-    //                 if (Math.sqrt(dx * dx + dy * dy) < pit.radius) {
-    //                     this.handlePitClick(pit, row, col, event);
-    //                     return;
-    //                 }
-    //             }
-    //         }
-    //     });
-    // }
     initClickHandling() {
         this.game.canvas.addEventListener('click', (event) => {
             this.handleClick(event, false);
@@ -269,47 +307,7 @@ class Board {
         }
     }
 
-
-    // handlePitClick(pit, row, col, event) {
-    //     if (!this.isSowing) {
-    //         // Pickup phase
-    //         if (pit.owner === "player" && pit.seedCount > 1) {
-    //             // Now pickup only allowed if pit belongs to player
-    //             this.heldSeeds = pit.seedCount;
-    //             pit.seedCount = 0;
-    //             pit.seeds = [];
-    //             this.flashPit(pit);
-    //             this.isSowing = true;
-    //             this.startTrackingMouse(event);
-    //             this.currentPitIndex = this.getIndex(row, col);
-    //         }
-    //     } else {
-    //         // Sowing phase
-    //         if (this.heldSeeds > 0 && pit.owner === "player") {
-    //             pit.seedCount++;
-    //             pit.initSeeds();
-    //             this.heldSeeds--;
-
-    //             if (this.heldSeeds === 0) {
-    //                 // Check after dropping the last seed
-    //                 if (pit.seedCount > 1) {
-    //                     // Auto pick up from this pit
-    //                     this.heldSeeds = pit.seedCount;
-    //                     pit.seedCount = 0;
-    //                     pit.seeds = [];
-    //                     this.flashPit(pit);
-    //                     // No need to change isSowing or mouse tracking
-    //                     // because we are still sowing
-    //                 } else {
-    //                     // Done sowing normally
-    //                     this.isSowing = false;
-    //                     this.stopTrackingMouse();
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-   handlePitClick(pit, row, col, event, isDoubleClick) {
+    handlePitClick(pit, row, col, event, isDoubleClick) {
     if (!this.isSowing) {
         // Pickup phase
         if (!isDoubleClick && pit.owner === "player" && pit.seedCount > 1) {
@@ -362,36 +360,6 @@ class Board {
                 }
             }
         } else {
-            // // Single-click during sowing
-            // if (pit === this.originPit) {
-            //     // Prevent sowing into the original pit on single click
-            //     return;
-            // }
-            // if (this.heldSeeds > 0 && pit.owner === "player") {
-            //     pit.seedCount++;
-            //     pit.initSeeds();
-            //     this.heldSeeds--;
-
-            //     if (this.heldSeeds === 0) {
-            //         if (pit.seedCount > 1) {
-            //             this.heldSeeds = pit.seedCount;
-            //             pit.seedCount = 0;
-            //             pit.seeds = [];
-            //             this.flashPit(pit);
-            //             this.originPit = pit; // New origin if re-pickup
-            //             this.isManualPickup = false; // automatic pickup
-            //         } else {
-            //             this.isSowing = false;
-            //             this.stopTrackingMouse();
-            //             this.originPit = null;
-            //             this.isManualPickup = false;
-            //         }
-            //     }
-                // Single-click during sowing
-                // if (pit === this.originPit) {
-                //     return; // Prevent single-click sow into original pit
-                // }
-
                 // Check if correct pit (anti-clockwise move)
                 const clickedPitIndex = this.getIndex(pit);
                 if (clickedPitIndex !== this.expectedPitIndex) {
@@ -405,12 +373,72 @@ class Board {
                     this.heldSeeds--;
 
                     if (this.heldSeeds === 0) {
+                        const row = this.getRowFromIndex(clickedPitIndex);
+                        const col = this.getColFromIndex(clickedPitIndex);
+
+                        let captured = false;
+
+                        if (row === 2) {
+                            const opponentRow0Pit = this.pits[0][col];
+                            const opponentRow1Pit = this.pits[1][col];
+
+                            if (opponentRow0Pit.seedCount > 0 && opponentRow1Pit.seedCount > 0) {
+                                const capturedSeeds = opponentRow0Pit.seedCount + opponentRow1Pit.seedCount;
+
+                                const origin = this.originPit;
+                                this.captureMouseX = this.mouseX;
+                                this.captureMouseY = this.mouseY;
+
+
+                                // Fly seeds
+                                for (let i = 0; i < opponentRow0Pit.seedCount; i++) {
+                                    this.flyingSeeds.push(new FlyingSeed(
+                                        opponentRow0Pit.x, opponentRow0Pit.y,
+                                        this.captureMouseX, this.captureMouseY,
+                                        this.game
+                                    ));
+                                }
+                                for (let i = 0; i < opponentRow1Pit.seedCount; i++) {
+                                    this.flyingSeeds.push(new FlyingSeed(
+                                        opponentRow1Pit.x, opponentRow1Pit.y,
+                                        this.captureMouseX, this.captureMouseY,
+                                        this.game
+                                    ));
+                                }
+
+                                opponentRow0Pit.seedCount = 0;
+                                opponentRow1Pit.seedCount = 0;
+                                opponentRow0Pit.initSeeds();
+                                opponentRow1Pit.initSeeds();
+
+                                // origin.pendingCapturedSeeds = capturedSeeds;
+                                this.pendingCapturedSeedsCount = capturedSeeds;
+                                this.pendingSowFromCaptureOrigin = origin;
+
+                                this.flashPit(origin, 'lime');
+
+                                // End sowing
+                                this.isSowing = false;
+                                // this.stopTrackingMouse();
+                                // this.heldSeeds = 0;
+                                this.heldSeeds = this.pendingCapturedSeedsCount;
+                                this.originPit = null;
+                                this.isManualPickup = false;
+                                this.currentPitIndex = null;
+                                this.expectedPitIndex = null;
+
+                                console.log("Captured seeds to origin pit index:", this.getIndex(origin));
+                                return;
+                            }
+                        }
+
+                        // ONLY if no capture, check for re-pickup
                         if (pit.seedCount > 1) {
                             this.heldSeeds = pit.seedCount;
                             pit.seedCount = 0;
                             pit.seeds = [];
                             this.flashPit(pit);
-                            this.originPit = pit; // New origin if re-pickup
+                            this.originPit = pit; // now valid to update origin
                             this.isManualPickup = false;
                             this.currentPitIndex = clickedPitIndex;
                             this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
@@ -422,6 +450,7 @@ class Board {
                             this.currentPitIndex = null;
                             this.expectedPitIndex = null;
                         }
+
                     } else {
                         // Update expected pit normally
                         this.expectedPitIndex = (clickedPitIndex + 1 + this.rows * this.cols) % 16;
@@ -429,9 +458,9 @@ class Board {
                 }
             }
         }
+        console.log("seeds: ",this.heldSeeds);
+        console.log("original pit index: ",this.getIndex(this.originPit));
     }
-
-
 
     draw() {
         // draw board background
@@ -451,6 +480,39 @@ class Board {
                         pit.isFlashing = false; // stop flashing after timer ends
                     }
                 }
+            }
+        }
+
+        // Draw flying seeds
+        for (let i = 0; i < this.flyingSeeds.length; i++) {
+            const seed = this.flyingSeeds[i];
+            seed.update();
+            seed.draw(this.game.context);
+        }
+
+        // Remove finished flying seeds
+        this.flyingSeeds = this.flyingSeeds.filter(seed => !seed.isFinished());
+
+        // After flying seeds finished, add to pit
+        for (let row of this.pits) {
+            for (let pit of row) {
+                    
+                    if (this.flyingSeeds.length === 0 && this.pendingSowFromCaptureOrigin) {
+                        const pit = this.pendingSowFromCaptureOrigin;
+
+                        // Resume sowing from original pit using captured seeds
+                        this.heldSeeds = this.pendingCapturedSeedsCount;
+                        this.isSowing = true;
+                        this.originPit = pit;
+                        this.currentPitIndex = this.getIndex(pit);
+                        this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
+                        this.flashPit(pit, 'white');
+                        this.startTrackingMouse(); // 🟢 Start tracking the mouse again
+
+                        // Reset
+                        this.pendingSowFromCaptureOrigin = null;
+                        this.pendingCapturedSeedsCount = 0;
+                    }
             }
         }
 
