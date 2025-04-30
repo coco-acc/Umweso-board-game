@@ -275,6 +275,7 @@ class Board {
                 this.pits[row][col] = pit;
             }
         }
+        console.log('ratio: ', this.game.ratio);
     }
 
     initClickHandling() {
@@ -497,22 +498,22 @@ class Board {
         for (let row of this.pits) {
             for (let pit of row) {
                     
-                    if (this.flyingSeeds.length === 0 && this.pendingSowFromCaptureOrigin) {
-                        const pit = this.pendingSowFromCaptureOrigin;
+                if (this.flyingSeeds.length === 0 && this.pendingSowFromCaptureOrigin) {
+                    const pit = this.pendingSowFromCaptureOrigin;
 
-                        // Resume sowing from original pit using captured seeds
-                        this.heldSeeds = this.pendingCapturedSeedsCount;
-                        this.isSowing = true;
-                        this.originPit = pit;
-                        this.currentPitIndex = this.getIndex(pit);
-                        this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
-                        this.flashPit(pit, 'white');
-                        this.startTrackingMouse(); // 🟢 Start tracking the mouse again
+                    // Resume sowing from original pit using captured seeds
+                    this.heldSeeds = this.pendingCapturedSeedsCount;
+                    this.isSowing = true;
+                    this.originPit = pit;
+                    this.currentPitIndex = this.getIndex(pit);
+                    this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
+                    this.flashPit(pit, 'white');
+                    this.startTrackingMouse(); // 🟢 Start tracking the mouse again
 
-                        // Reset
-                        this.pendingSowFromCaptureOrigin = null;
-                        this.pendingCapturedSeedsCount = 0;
-                    }
+                    // Reset
+                    this.pendingSowFromCaptureOrigin = null;
+                    this.pendingCapturedSeedsCount = 0;
+                }
             }
         }
 
