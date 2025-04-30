@@ -113,7 +113,6 @@ class FlyingSeed {
     }
 }
 
-
 class Board {
     constructor(game) {
         this.game = game;
@@ -142,7 +141,6 @@ class Board {
         this.initPits();
         this.initClickHandling();
         this.flyingSeeds = []; // for flying captured seeds
-
     }
 
     flashPit(pit, color = 'gold') {
@@ -151,23 +149,6 @@ class Board {
         pit.flashColor = color; // store the flash color
     }
 
-    // startTrackingMouse(event = null) {
-    //     if (this.trackMouse) return;
-    //     this.trackMouse = true;
-
-    //     if (event) {
-    //         const rect = this.game.canvas.getBoundingClientRect();
-    //         this.mouseX = event.clientX - rect.left;
-    //         this.mouseY = event.clientY - rect.top;
-    //     }
-
-    //     this.mouseMoveHandler = (e) => {
-    //         const rect = this.game.canvas.getBoundingClientRect();
-    //         this.mouseX = e.clientX - rect.left;
-    //         this.mouseY = e.clientY - rect.top;
-    //     };
-    //     this.game.canvas.addEventListener('mousemove', this.mouseMoveHandler);
-    // }
     startTrackingMouse(event = null) {
         if (this.trackMouse) return;
         this.trackMouse = true;
@@ -415,9 +396,7 @@ class Board {
                                 // origin.pendingCapturedSeeds = capturedSeeds;
                                 this.pendingCapturedSeedsCount = capturedSeeds;
                                 this.pendingSowFromCaptureOrigin = origin;
-
-                                this.flashPit(origin, 'lime');
-
+                                
                                 // End sowing
                                 this.isSowing = false;
                                 // this.stopTrackingMouse();
@@ -427,8 +406,6 @@ class Board {
                                 this.isManualPickup = false;
                                 this.currentPitIndex = null;
                                 this.expectedPitIndex = null;
-
-                                console.log("Captured seeds to origin pit index:", this.getIndex(origin));
                                 return;
                             }
                         }
@@ -459,8 +436,8 @@ class Board {
                 }
             }
         }
-        console.log("seeds: ",this.heldSeeds);
-        console.log("original pit index: ",this.getIndex(this.originPit));
+        // console.log("seeds: ",this.heldSeeds);
+        // console.log("original pit index: ",this.getIndex(this.originPit));
     }
 
     draw() {
@@ -507,7 +484,11 @@ class Board {
                     this.originPit = pit;
                     this.currentPitIndex = this.getIndex(pit);
                     this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
-                    this.flashPit(pit, 'white');
+                    // this.flashPit(pit, 'white');
+                    let nextIndex = (this.getIndex(this.originPit) + 1);
+                    let expectedPit = this.getPitByIndex(nextIndex);
+                    this.flashPit(expectedPit, 'lime');
+
                     this.startTrackingMouse(); // 🟢 Start tracking the mouse again
 
                     // Reset
