@@ -21,125 +21,101 @@ io.on('connection', (socket) => {
     }
 
     // Assign the next available role
-    const playerId = playerRoles.shift(); // Takes first role, then next
+    const playerId = playerRoles.shift(); // Takes 'player' first, then 'opponent'
     players[socket.id] = playerId;
     socket.emit('playerAssignment', playerId);
 
-    // Notify all players about current player count
+    // Notify all clients of current player count
     io.emit('playerCount', Object.keys(players).length);
 
+    // Start game if both players are in
     if (Object.keys(players).length === 2) {
         gameState = createInitialBoard();
         io.emit('gameStateUpdate', gameState);
     }
 
-//     socket.on('playerAction', ({ pitIndex, action }) => {
-//     const player = players[socket.id];
-//     if (!gameState || !player) return;
+    // socket.on('sowSequence', ({ pitIndexes, nextPlayer }) => {
+    //     if (!players[socket.id] || !gameState) return;
 
-//     if (player !== gameState.currentPlayer) return;
+    //     gameState.currentPlayer = nextPlayer;
 
-//     const pit = gameState.pits[pitIndex];
+    //     // Broadcast to all clients
+    //     io.emit('sowSequence', {
+    //         pitIndexes,
+    //         player: players[socket.id],
+    //         nextPlayer
+    //     });
+    // });
 
-//     // Rule: only pick from own pits with at least 2 seeds
-//     if (pit.owner !== player || pit.seedCount < 2) return;
+    // // Client sends full board + nextPlayer at end of turn
+    // socket.on('endTurn', ({ pits, nextPlayer }) => {
+    //     const player = players[socket.id];
+    //     if (!player || !gameState) return;
 
-//     let seeds = pit.seedCount;
-//     pit.seedCount = 0;
+    //     // Optional: basic validation (could be expanded)
+    //     if (gameState.currentPlayer !== player) {
+    //         socket.emit('invalidMove', 'Not your turn!');
+    //         return;
+    //     }
 
-//     let lastIndex = pitIndex;
+    //     // Apply received state
+    //     gameState.pits = pits;
+    //     gameState.currentPlayer = nextPlayer;
 
-//     while (seeds > 0) {
-//         lastIndex = (lastIndex + 1) % gameState.pits.length;
-//         gameState.pits[lastIndex].seedCount++;
-//         seeds--;
-//     }
+    //     io.emit('gameStateUpdate', gameState);
+    // });
+    socket.on('sowSequence', ({ pitIndexes, nextPlayer }) => {
+        if (!players[socket.id] || !gameState) return;
 
-//     // Check if the last pit is owned by current player and has >1 seed → re-pickup
-//     const lastPit = gameState.pits[lastIndex];
-//     if (lastPit.owner === player && lastPit.seedCount > 1) {
-//         // Auto pickup and continue turn
-//         gameState.pits[lastIndex].seedCount = 0;
-//         seeds = lastPit.seedCount;
-//         while (seeds > 0) {
-//             lastIndex = (lastIndex + 1) % gameState.pits.length;
-//             gameState.pits[lastIndex].seedCount++;
-//             seeds--;
-//         }
+        // Validate it's the current player's turn
+        if (gameState.currentPlayer !== players[socket.id]) {
+            socket.emit('invalidMove', 'Not your turn!');
+            return;
+        }
 
-//         // Check again if another re-pickup is needed
-//         // If you want recursive pickup, you can wrap this in a loop
-//     }
+        // Update the game state with the new player turn
+        gameState.currentPlayer = nextPlayer;
 
-//     // If final pit does not qualify for another pickup → switch turns
-//     const finalPit = gameState.pits[lastIndex];
-//     if (!(finalPit.owner === player && finalPit.seedCount > 1)) {
-//         gameState.currentPlayer = (gameState.currentPlayer === 'player') ? 'opponent' : 'player';
-//     }
+        // Broadcast to all clients
+        io.emit('sowSequence', {
+            pitIndexes,
+            player: players[socket.id],
+            nextPlayer
+        });
 
-//     io.emit("gameStateUpdate", gameState);
-// });
-    socket.on('playerAction', ({ pitIndex, action }) => {
+        // Also send a full game state update
+        io.emit('gameStateUpdate', gameState);
+    });
+
+    socket.on('endTurn', ({ pits, nextPlayer }) => {
     const player = players[socket.id];
-    if (!gameState || !player) return;
+    if (!player || !gameState) return;
 
-    // Only allow actions from the current player
-    if (player !== gameState.currentPlayer) {
+    // Validate it's the current player's turn
+    if (gameState.currentPlayer !== player) {
         socket.emit('invalidMove', 'Not your turn!');
         return;
     }
 
-    const pit = gameState.pits[pitIndex];
+    // Apply received state
+    gameState.pits = pits;
+    gameState.currentPlayer = nextPlayer; // This is the key change
 
-    // Basic rule: can only pick from your own pits with at least 2 seeds
-    if (pit.owner !== player || pit.seedCount < 2) {
-        socket.emit('invalidMove', 'Invalid pit selection!');
-        return;
-    }
-
-    // Simplified sowing logic
-    let seeds = pit.seedCount;
-    pit.seedCount = 0;
-    let lastIndex = pitIndex;
-
-    // Distribute seeds
-    while (seeds > 0) {
-        lastIndex = (lastIndex + 1) % gameState.pits.length;
-        gameState.pits[lastIndex].seedCount++;
-        seeds--;
-    }
-
-    // Check for re-pickup
-    const lastPit = gameState.pits[lastIndex];
-    if (lastPit.owner === player && lastPit.seedCount > 1) {
-        // Auto pickup and continue turn
-        gameState.pits[lastIndex].seedCount = 0;
-        seeds = lastPit.seedCount;
-        while (seeds > 0) {
-            lastIndex = (lastIndex + 1) % gameState.pits.length;
-            gameState.pits[lastIndex].seedCount++;
-            seeds--;
-        }
-    }
-
-    // Switch turns if no re-pickup
-    const finalPit = gameState.pits[lastIndex];
-    if (!(finalPit.owner === player && finalPit.seedCount > 1)) {
-        gameState.currentPlayer = gameState.currentPlayer === 'player' ? 'opponent' : 'player';
-    }
-
-        io.emit("gameStateUpdate", gameState);
-    });
+    // Broadcast to all clients
+    io.emit('gameStateUpdate', gameState);
+});
 
     socket.on('disconnect', () => {
         console.log('Disconnected:', socket.id);
-        const disconnectedPlayerRole = players[socket.id];
-        if (disconnectedPlayerRole) {
-            // Make the role available again
-            playerRoles.unshift(disconnectedPlayerRole);
+
+        const disconnectedRole = players[socket.id];
+        if (disconnectedRole) {
+            playerRoles.unshift(disconnectedRole); // Re-queue the role
         }
+
         delete players[socket.id];
-        gameState = null;
+        gameState = null; // reset game
+
         io.emit('playerLeft');
         io.emit('playerCount', Object.keys(players).length);
     });
@@ -153,12 +129,119 @@ function createInitialBoard() {
             owner: i < 16 ? 'opponent' : 'player',
         });
     }
-    return { 
+    return {
         pits,
-        currentPlayer: 'player' // Player always starts first
+        currentPlayer: 'player'
     };
 }
 
 server.listen(3000, () => {
     console.log('Server running on http://localhost:3000');
 });
+
+
+// const express = require('express');
+// const http = require('http');
+// const { Server } = require('socket.io');
+
+// const app = express();
+// const server = http.createServer(app);
+// const io = new Server(server);
+
+// app.use(express.static('public'));
+
+// let players = {};
+// let gameState = null;
+// const playerRoles = ['player', 'opponent']; // Available roles
+// const availableRoles = [...playerRoles]; // Clone to track available roles
+
+// io.on('connection', (socket) => {
+//     console.log('New connection:', socket.id);
+
+//     if (Object.keys(players).length >= 2) {
+//         socket.emit('full');
+//         return;
+//     }
+
+//     // Assign the next available role immediately
+//     const assignedRole = availableRoles.shift();
+//     players[socket.id] = assignedRole;
+//     socket.emit('playerAssignment', assignedRole);
+
+//     // Notify all clients of current player count
+//     io.emit('playerCount', Object.keys(players).length);
+
+//     // Start game if both players are in
+//     if (Object.keys(players).length === 2) {
+//         gameState = createInitialBoard();
+//         io.emit('gameStateUpdate', gameState);
+//     }
+
+//     socket.on('sowSequence', ({ pitIndexes, nextPlayer }) => {
+//         if (!players[socket.id] || !gameState) return;
+
+//         gameState.currentPlayer = nextPlayer;
+
+//         // Broadcast to all clients
+//         io.emit('sowSequence', {
+//             pitIndexes,
+//             player: players[socket.id],
+//             nextPlayer
+//         });
+//     });
+
+//     socket.on('endTurn', ({ pits, nextPlayer }) => {
+//         const player = players[socket.id];
+//         if (!player || !gameState) return;
+
+//         if (gameState.currentPlayer !== player) {
+//             socket.emit('invalidMove', 'Not your turn!');
+//             return;
+//         }
+
+//         gameState.pits = pits;
+//         gameState.currentPlayer = nextPlayer;
+
+//         io.emit('gameStateUpdate', gameState);
+//     });
+
+//     socket.on('disconnect', () => {
+//         console.log('Disconnected:', socket.id);
+
+//         const disconnectedRole = players[socket.id];
+//         if (disconnectedRole) {
+//             // Return the role to availableRoles if it's not already there
+//             if (!availableRoles.includes(disconnectedRole)) {
+//                 availableRoles.push(disconnectedRole);
+//                 availableRoles.sort(); // Keep consistent order
+//             }
+//             delete players[socket.id];
+//         }
+
+//         // Reset game if someone disconnects
+//         if (Object.keys(players).length < 2) {
+//             gameState = null;
+//             io.emit('playerLeft');
+//         }
+
+//         io.emit('playerCount', Object.keys(players).length);
+//     });
+// });
+
+// function createInitialBoard() {
+//     const pits = [];
+//     for (let i = 0; i < 32; i++) {
+//         pits.push({
+//             seedCount: 2,
+//             owner: i < 16 ? 'opponent' : 'player',
+//         });
+//     }
+//     return {
+//         pits,
+//         currentPlayer: 'player'
+//     };
+// }
+
+// server.listen(3000, () => {
+//     console.log('Server running on http://localhost:3000');
+// });

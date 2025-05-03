@@ -130,7 +130,7 @@ class Board {
 
         this.mouseX = 0;
         this.mouseY = 0;
-        this.trackMouse = false; // new flag
+        this.trackMouse = false;
         this.mouseMoveHandler = null; // store listener reference
         this.currentPitIndex = null; // track which pit you're sowing into
         this.originPit = null; 
@@ -141,6 +141,7 @@ class Board {
         this.initPits();
         this.initClickHandling();
         this.flyingSeeds = []; // for flying captured seeds
+        this.sowedPitIndexes = []; // Initialize h
     }
 
     flashPit(pit, color = 'gold') {
@@ -299,202 +300,401 @@ class Board {
         }
     }
 
-    // loadStateFromServer(state) {
-    //     for (let i = 0; i < 32; i++) {
-    //         const pit = this.getPitByIndex(i);
-    //         pit.seedCount = state.pits[i].seedCount;
-    //         pit.initSeeds();
-    //     }
-    // }
     loadStateFromServer(state) {
+        const oldPits = this.getLinearPits();
+        const newPits = state.pits;
+
         for (let i = 0; i < 32; i++) {
-            const pit = this.getPitByIndex(i);
-            pit.seedCount = state.pits[i].seedCount;
-            pit.owner = state.pits[i].owner; // 🟢 update this too
-            pit.initSeeds();
+            const oldPit = oldPits[i];
+            const newSeedCount = newPits[i].seedCount;
+
+            // Owner shouldn't change during play
+            oldPit.owner = newPits[i].owner;
+
+            const diff = newSeedCount - oldPit.seedCount;
+
+            if (diff > 0) {
+                // Animate seeds flying in
+                for (let j = 0; j < diff; j++) {
+                    this.flyingSeeds.push(new FlyingSeed(
+                        oldPit.x, oldPit.y - 100 * this.game.ratio, // from above
+                        oldPit.x, oldPit.y,
+                        this.game
+                    ));
+                }
+            }
+
+            // Apply final count now
+            oldPit.seedCount = newSeedCount;
+            oldPit.initSeeds();
         }
 
-        // Optional: store whose turn it is
+        // Update turn info
         this.currentPlayer = state.currentPlayer;
     }
 
-    handlePitClick(pit, row, col, event, isDoubleClick) {
-        // if (this.game.isMultiplayer && this.game.playerId !== this.currentPlayer) {
-        //     console.log("Not your turn.");
-        //     return;
-        // }
+    animateSowSequence(pitIndexes, player, nextPlayer) {
+        this.animationQueue = [...pitIndexes];
+        this.animationPlayer = player;
+        this.animationNextPlayer = nextPlayer;
+        this.animationStepIndex = 0;
+        this.animationTimer = 0;
+        this.sowedPitIndexes = []; // Prevent interaction during animation
+        console.log("Animating sow sequence:", pitIndexes);
+    }
 
-        // if (this.game.isMultiplayer) {
-        //     this.game.socket.emit("playerAction", {
-        //         pitIndex: this.getIndex(pit),
-        //         action: isDoubleClick ? "doubleClick" : "click"
-        //     });
-        //     return;
-        // }
+    getPitRangeForPlayer(playerId) {
+        const totalPits = this.rows * this.cols; // e.g. 32
+        const pitsPerPlayer = totalPits / 2;     // e.g. 16
+        const start = playerId === 0 ? 0 : pitsPerPlayer;
+        const end = start + pitsPerPlayer;
+        return { start, end };
+    }
+
+    // handlePitClick(pit, row, col, event, isDoubleClick) {
+    //     // Don't allow clicks during automatic animation from opponent
+    //     if (this.animationQueue) return;
+
+    //     if (this.game.isMultiplayer) {
+    //         // Only allow clicks on your own pits during your turn
+    //         if (pit.owner !== this.game.playerId || this.game.playerId !== this.game.currentPlayer) {
+    //             return;
+    //         }
+
+    //         // Send action to server – now replaced by client-driven sowing
+    //         // So no emit here — game state is client-driven
+    //     }
+
+    //     if (!this.isSowing) {
+    //         // Pickup phase
+    //         if (!isDoubleClick && pit.owner === this.game.playerId && pit.seedCount > 1) {
+    //             this.heldSeeds = pit.seedCount;
+    //             pit.seedCount = 0;
+    //             pit.seeds = [];
+    //             this.flashPit(pit, 'white');
+    //             this.isSowing = true;
+    //             this.startTrackingMouse(event);
+    //             this.currentPitIndex = this.getIndex(pit);
+    //             // this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
+    //             // this.expectedPitIndex = (this.currentPitIndex + 1) + (this.rows * this.cols) % 32;
+    //             const { start, end } = this.getPitRangeForPlayer(this.game.playerId);
+    //             this.expectedPitIndex = (this.currentPitIndex + 1 - start) % (end - start) + start;
+
+    //             this.originPit = pit;
+    //             this.isManualPickup = true;
+    //         }
+    //     } else {
+    //         // Sowing phase
+    //         const clickedPitIndex = this.getIndex(pit);
+
+    //         if (isDoubleClick) {
+    //             // Cancel manual pickup
+    //             if (this.isManualPickup && this.originPit) {
+    //                 this.originPit.seedCount += this.heldSeeds;
+    //                 this.originPit.initSeeds();
+    //                 this.heldSeeds = 0;
+    //                 this.isSowing = false;
+    //                 this.stopTrackingMouse();
+    //                 this.originPit = null;
+    //                 this.isManualPickup = false;
+
+    //                 this.sendEndTurnIfReady();
+    //             } else if (pit === this.originPit) {
+    //                 // Special case: sow into origin
+    //                 pit.seedCount++;
+    //                 pit.initSeeds();
+    //                 this.heldSeeds--;
+
+    //                 this.sowedPitIndexes = this.sowedPitIndexes || [];
+    //                 this.sowedPitIndexes.push(clickedPitIndex);
+
+    //                 if (this.heldSeeds === 0) {
+    //                     if (pit.seedCount > 1) {
+    //                         this.heldSeeds = pit.seedCount;
+    //                         pit.seedCount = 0;
+    //                         pit.seeds = [];
+    //                         this.flashPit(pit);
+    //                         this.originPit = pit;
+    //                         this.isManualPickup = false;
+    //                     } else {
+    //                         this.isSowing = false;
+    //                         this.stopTrackingMouse();
+    //                         this.originPit = null;
+    //                         this.isManualPickup = false;
+
+    //                         this.sendEndTurnIfReady();
+    //                     }
+    //                 }
+    //             }
+    //         } else {
+    //             // Normal sowing into next pit
+    //             // if (clickedPitIndex !== this.expectedPitIndex) return;
+    //             if (clickedPitIndex !== this.expectedPitIndex || pit.owner !== this.game.playerId) return;
+
+
+    //             if (this.heldSeeds > 0 && pit.owner === this.game.playerId) {
+    //                 pit.seedCount++;
+    //                 pit.initSeeds();
+    //                 this.heldSeeds--;
+
+    //                 this.sowedPitIndexes = this.sowedPitIndexes || [];
+    //                 this.sowedPitIndexes.push(clickedPitIndex);
+
+    //                 if (this.heldSeeds === 0) {
+    //                     const row = this.getRowFromIndex(clickedPitIndex);
+    //                     const col = this.getColFromIndex(clickedPitIndex);
+
+    //                     let captured = false;
+
+    //                     if (row === 2) {
+    //                         const opponentRow0Pit = this.pits[0][col];
+    //                         const opponentRow1Pit = this.pits[1][col];
+
+    //                         if (opponentRow0Pit.seedCount > 0 && opponentRow1Pit.seedCount > 0) {
+    //                             const capturedSeeds = opponentRow0Pit.seedCount + opponentRow1Pit.seedCount;
+    //                             this.captureMouseX = this.mouseX;
+    //                             this.captureMouseY = this.mouseY;
+
+    //                             for (let i = 0; i < opponentRow0Pit.seedCount; i++) {
+    //                                 this.flyingSeeds.push(new FlyingSeed(
+    //                                     opponentRow0Pit.x, opponentRow0Pit.y,
+    //                                     this.captureMouseX, this.captureMouseY,
+    //                                     this.game
+    //                                 ));
+    //                             }
+    //                             for (let i = 0; i < opponentRow1Pit.seedCount; i++) {
+    //                                 this.flyingSeeds.push(new FlyingSeed(
+    //                                     opponentRow1Pit.x, opponentRow1Pit.y,
+    //                                     this.captureMouseX, this.captureMouseY,
+    //                                     this.game
+    //                                 ));
+    //                             }
+
+    //                             opponentRow0Pit.seedCount = 0;
+    //                             opponentRow1Pit.seedCount = 0;
+    //                             opponentRow0Pit.initSeeds();
+    //                             opponentRow1Pit.initSeeds();
+
+    //                             this.pendingCapturedSeedsCount = capturedSeeds;
+    //                             this.pendingSowFromCaptureOrigin = this.originPit;
+
+    //                             this.sowedPitIndexes = this.sowedPitIndexes || [];
+    //                             this.sowedPitIndexes.push(clickedPitIndex);
+
+    //                             this.isSowing = false;
+    //                             this.heldSeeds = this.pendingCapturedSeedsCount;
+    //                             this.originPit = null;
+    //                             this.isManualPickup = false;
+    //                             this.currentPitIndex = null;
+    //                             this.expectedPitIndex = null;
+    //                             return;
+    //                         }
+    //                     }
+
+    //                     // No capture
+    //                     if (pit.seedCount > 1) {
+    //                         this.heldSeeds = pit.seedCount;
+    //                         pit.seedCount = 0;
+    //                         pit.seeds = [];
+    //                         this.flashPit(pit);
+    //                         this.originPit = pit;
+    //                         this.isManualPickup = false;
+    //                         this.currentPitIndex = clickedPitIndex;
+    //                         // this.expectedPitIndex = (clickedPitIndex + 1 + this.rows * this.cols) % 16;
+    //                         // this.expectedPitIndex = (clickedPitIndex + 1) + (this.rows * this.cols) % 32;
+    //                         const { start, end } = this.getPitRangeForPlayer(this.game.playerId);
+    //                         this.expectedPitIndex = (clickedPitIndex + 1 - start) % (end - start) + start;
+    //                     } else {
+    //                         this.isSowing = false;
+    //                         this.stopTrackingMouse();
+    //                         this.originPit = null;
+    //                         this.isManualPickup = false;
+    //                         this.currentPitIndex = null;
+    //                         this.expectedPitIndex = null;
+
+    //                         this.sendEndTurnIfReady();
+    //                     }
+    //                 } else {
+    //                     // this.expectedPitIndex = (clickedPitIndex + 1) + (this.rows * this.cols) % 32;
+    //                     const { start, end } = this.getPitRangeForPlayer(this.game.playerId);
+    //                     this.expectedPitIndex = (clickedPitIndex + 1 - start) % (end - start) + start;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    getNextPitIndex(currentIndex, playerId) {
+    // Get all pits in linear order
+    const linearPits = this.getLinearPits();
+    const totalPits = linearPits.length;
+    
+    // Calculate next index (circular)
+    let nextIndex = (currentIndex + 1) % totalPits;
+    
+    // For player, only sow in their own pits
+    if (playerId === 'player') {
+        while (linearPits[nextIndex].owner !== 'player') {
+            nextIndex = (nextIndex + 1) % totalPits;
+        }
+    }
+    // For opponent, only sow in their own pits
+    else if (playerId === 'opponent') {
+        while (linearPits[nextIndex].owner !== 'opponent') {
+            nextIndex = (nextIndex + 1) % totalPits;
+        }
+    }
+    
+    return nextIndex;
+}
+
+    handlePitClick(pit, row, col, event, isDoubleClick) {
+        // Don't allow clicks during automatic animation from opponent
+        if (this.animationQueue) return;
+
         if (this.game.isMultiplayer) {
             // Only allow clicks on your own pits during your turn
-            if (pit.owner !== this.game.playerId || 
-                this.game.playerId !== this.game.currentPlayer) {
+            if (pit.owner !== this.game.playerId || this.game.playerId !== this.game.currentPlayer) {
                 return;
             }
-
-            // Send action to server
-            this.game.socket.emit("playerAction", {
-                pitIndex: this.getIndex(pit),
-                action: isDoubleClick ? "doubleClick" : "click"
-            });
-            return;
         }
 
         if (!this.isSowing) {
-        // Pickup phase
-        if (!isDoubleClick && pit.owner === this.game.playerId && pit.seedCount > 1) {
-            this.heldSeeds = pit.seedCount;
-            pit.seedCount = 0;
-            pit.seeds = [];
-            this.flashPit(pit, 'white');
-            this.isSowing = true;
-            this.startTrackingMouse(event);
-            this.currentPitIndex = this.getIndex(pit);
-            this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16
-            //(this.rows * this.cols); // anti-clockwise (decrement index)
-
-            this.originPit = pit;
-            this.isManualPickup = true;
-        }
+            // Pickup phase
+            if (!isDoubleClick && pit.owner === this.game.playerId && pit.seedCount > 1) {
+                this.heldSeeds = pit.seedCount;
+                pit.seedCount = 0;
+                pit.seeds = [];
+                this.flashPit(pit, 'white');
+                this.isSowing = true;
+                this.startTrackingMouse(event);
+                this.currentPitIndex = this.getIndex(pit);
+                this.expectedPitIndex = this.getNextPitIndex(this.currentPitIndex, this.game.playerId);
+                this.originPit = pit;
+                this.isManualPickup = true;
+                this.sowedPitIndexes = [this.currentPitIndex];
+            }
         } else {
             // Sowing phase
+            const clickedPitIndex = this.getIndex(pit);
+
             if (isDoubleClick) {
-                // Double-click during sowing
-                if (this.isManualPickup && this.originPit) {
-                    // Double-click cancel
-                    this.originPit.seedCount += this.heldSeeds;
-                    this.originPit.initSeeds();
-                    this.heldSeeds = 0;
-                    this.isSowing = false;
-                    this.stopTrackingMouse();
-                    this.originPit = null;
-                    this.isManualPickup = false;
-                } else if (pit === this.originPit) {
-                    // Special case: double-click sow into origin pit
-                    pit.seedCount++;
-                    pit.initSeeds();
-                    this.heldSeeds--;
+                // Cancel manual pickup
+                    if (this.isManualPickup && this.originPit) {
+                        this.originPit.seedCount += this.heldSeeds;
+                        this.originPit.initSeeds();
+                        this.heldSeeds = 0;
+                        this.isSowing = false;
+                        this.stopTrackingMouse();
+                        this.originPit = null;
+                        this.isManualPickup = false;
 
-                    if (this.heldSeeds === 0) {
-                        if (pit.seedCount > 1) {
-                            this.heldSeeds = pit.seedCount;
-                            pit.seedCount = 0;
-                            pit.seeds = [];
-                            this.flashPit(pit);
-                            this.originPit = pit; // New origin if re-pickup
-                            this.isManualPickup = false; // now automatic pickup
-                        } else {
-                            this.isSowing = false;
-                            this.stopTrackingMouse();
-                            this.originPit = null;
-                            this.isManualPickup = false;
-                        }
-                    }
-                }
-            }
-            else {
-                // Check if correct pit (anti-clockwise move)
-                const clickedPitIndex = this.getIndex(pit);
-                if (clickedPitIndex !== this.expectedPitIndex) {
-                    return; // clicked wrong pit, do nothing
-                }
+                        this.sendEndTurnIfReady();
+                    } else if (pit === this.originPit) {
+                        // Special case: sow into origin
+                        pit.seedCount++;
+                        pit.initSeeds();
+                        this.heldSeeds--;
 
-                // Correct pit, proceed to sow
-                if (this.heldSeeds > 0 && pit.owner === this.game.playerId) {
-                    pit.seedCount++;
-                    pit.initSeeds();
-                    this.heldSeeds--;
+                        this.sowedPitIndexes = this.sowedPitIndexes || [];
+                        this.sowedPitIndexes.push(clickedPitIndex);
 
-                    if (this.heldSeeds === 0) {
-                        const row = this.getRowFromIndex(clickedPitIndex);
-                        const col = this.getColFromIndex(clickedPitIndex);
-
-                        let captured = false;
-
-                        if (row === 2) {
-                            const opponentRow0Pit = this.pits[0][col];
-                            const opponentRow1Pit = this.pits[1][col];
-
-                            if (opponentRow0Pit.seedCount > 0 && opponentRow1Pit.seedCount > 0) {
-                                const capturedSeeds = opponentRow0Pit.seedCount + opponentRow1Pit.seedCount;
-
-                                const origin = this.originPit;
-                                this.captureMouseX = this.mouseX;
-                                this.captureMouseY = this.mouseY;
-
-
-                                // Fly seeds
-                                for (let i = 0; i < opponentRow0Pit.seedCount; i++) {
-                                    this.flyingSeeds.push(new FlyingSeed(
-                                        opponentRow0Pit.x, opponentRow0Pit.y,
-                                        this.captureMouseX, this.captureMouseY,
-                                        this.game
-                                    ));
-                                }
-                                for (let i = 0; i < opponentRow1Pit.seedCount; i++) {
-                                    this.flyingSeeds.push(new FlyingSeed(
-                                        opponentRow1Pit.x, opponentRow1Pit.y,
-                                        this.captureMouseX, this.captureMouseY,
-                                        this.game
-                                    ));
-                                }
-
-                                opponentRow0Pit.seedCount = 0;
-                                opponentRow1Pit.seedCount = 0;
-                                opponentRow0Pit.initSeeds();
-                                opponentRow1Pit.initSeeds();
-
-                                // origin.pendingCapturedSeeds = capturedSeeds;
-                                this.pendingCapturedSeedsCount = capturedSeeds;
-                                this.pendingSowFromCaptureOrigin = origin;
-                                
-                                // End sowing
+                        if (this.heldSeeds === 0) {
+                            if (pit.seedCount > 1) {
+                                this.heldSeeds = pit.seedCount;
+                                pit.seedCount = 0;
+                                pit.seeds = [];
+                                this.flashPit(pit);
+                                this.originPit = pit;
+                                this.isManualPickup = false;
+                            } else {
                                 this.isSowing = false;
-                                // this.stopTrackingMouse();
-                                // this.heldSeeds = 0;
-                                this.heldSeeds = this.pendingCapturedSeedsCount;
+                                this.stopTrackingMouse();
                                 this.originPit = null;
                                 this.isManualPickup = false;
-                                this.currentPitIndex = null;
-                                this.expectedPitIndex = null;
-                                return;
+
+                                this.sendEndTurnIfReady();
                             }
                         }
+                    }
+            } else {
+                if (clickedPitIndex !== this.expectedPitIndex) return;
 
-                        // ONLY if no capture, check for re-pickup
-                        if (pit.seedCount > 1) {
-                            this.heldSeeds = pit.seedCount;
-                            pit.seedCount = 0;
-                            pit.seeds = [];
-                            this.flashPit(pit);
-                            this.originPit = pit; // now valid to update origin
-                            this.isManualPickup = false;
-                            this.currentPitIndex = clickedPitIndex;
-                            this.expectedPitIndex = (this.currentPitIndex + 1 + this.rows * this.cols) % 16;
-                        } else {
-                            this.isSowing = false;
-                            this.stopTrackingMouse();
-                            this.originPit = null;
-                            this.isManualPickup = false;
-                            this.currentPitIndex = null;
-                            this.expectedPitIndex = null;
-                        }
+                if (this.heldSeeds > 0) {
+                    pit.seedCount++;
+                    pit.initSeeds();
+                    this.heldSeeds--;
+                    this.sowedPitIndexes.push(clickedPitIndex);
 
+                    if (this.heldSeeds === 0) {
+                            // Check if last pit was empty (ending condition)
+                            if (pit.seedCount === 1) {
+                                this.endTurn();
+                            } 
+                            // If last pit has multiple seeds, continue sowing from it
+                            else if (pit.seedCount > 1 && pit.owner === this.game.playerId) {
+                                this.continueSowing(pit);
+                            } else {
+                                // Shouldn't normally get here
+                                this.endTurn();
+                            }
                     } else {
-                        // Update expected pit normally
-                        this.expectedPitIndex = (clickedPitIndex + 1 + this.rows * this.cols) % 16;
+                        this.expectedPitIndex = this.getNextPitIndex(clickedPitIndex, this.game.playerId);
                     }
                 }
             }
         }
-        // console.log("seeds: ",this.heldSeeds);
-        // console.log("original pit index: ",this.getIndex(this.originPit));
+    }
+
+    // Add this helper method
+    continueSowing(pit) {
+        this.heldSeeds = pit.seedCount;
+        pit.seedCount = 0;
+        pit.seeds = [];
+        this.flashPit(pit);
+        this.currentPitIndex = this.getIndex(pit);
+        this.expectedPitIndex = this.getNextPitIndex(this.currentPitIndex, this.game.playerId);
+    }
+        endTurn() {
+        this.isSowing = false;
+        this.stopTrackingMouse();
+        this.originPit = null;
+        this.isManualPickup = false;
+        
+        if (this.game.isMultiplayer) {
+            const nextPlayer = this.game.playerId === 'player' ? 'opponent' : 'player';
+            this.game.socket.emit('sowSequence', {
+                pitIndexes: this.sowedPitIndexes,
+                nextPlayer
+            });
+        } else {
+            // For single-player, just switch turns
+            this.game.currentPlayer = this.game.currentPlayer === 'player' ? 'opponent' : 'player';
+        }
+        
+        this.sowedPitIndexes = [];
+    }
+
+    moveToNextPit(currentIndex) {
+        const { start, end } = this.getPitRangeForPlayer(this.game.playerId);
+        this.currentPitIndex = currentIndex;
+        this.expectedPitIndex = (currentIndex + 1 - start) % (end - start) + start;
+    }
+
+    sendEndTurnIfReady() {
+        if (!this.game.isMultiplayer) return;
+        if (this.isSowing || this.heldSeeds > 0) return;
+
+        // This assumes you've been tracking the sowed pit indexes:
+        const sequence = this.sowedPitIndexes || [];
+        const nextPlayer = this.game.playerId === 'player' ? 'opponent' : 'player';
+
+        this.game.socket.emit('sowSequence', {
+            pitIndexes: sequence,
+            nextPlayer
+        });
+
+        this.sowedPitIndexes = []; // reset after turn
     }
 
     draw() {
@@ -571,6 +771,31 @@ class Board {
             ctx.textBaseline = 'middle';
             ctx.fillText(this.heldSeeds, this.mouseX, this.mouseY);
         }
+
+        // Animate sowing sequence (1 pit at a time)
+        if (this.animationQueue) {
+            this.animationTimer++;
+
+            if (this.animationStepIndex < this.animationQueue.length && this.animationTimer > 10) {
+                const index = this.animationQueue[this.animationStepIndex];
+                const pit = this.getPitByIndex(index);
+
+                pit.seedCount++;
+                pit.initSeeds();
+                this.flashPit(pit, 'lime');
+
+                this.animationStepIndex++;
+                this.animationTimer = 0;
+            }
+
+            if (this.animationStepIndex >= this.animationQueue.length && this.animationTimer > 10) {
+                this.currentPlayer = this.animationNextPlayer;
+                this.animationQueue = null;
+                this.animationStepIndex = 0;
+                this.animationTimer = 0;
+                this.sowedPitIndexes = [];
+            }
+        }
     }
 }
 
@@ -588,14 +813,7 @@ class Game {
         this.ratioH = this.baseHeight / this.height;
         this.ratioW = this.baseWidth / this.width;
         this.ratio = this.ratioH;
-        // console.log(this.ratioH);
-    //     this.socket.on("gameStateUpdate", (state) => {
-    //         this.board.loadStateFromServer(state);
-    //     });
-
-    //     this.board = new Board (this);
-    //     this.start(); // start the game loop
-    // }
+    
         this.isMultiplayer = true;
         this.socket = io();
 
@@ -607,13 +825,6 @@ class Game {
             document.getElementById('playerRole').innerText = `You are: ${id}`;
         });
 
-        // Game state updates
-        this.socket.on("gameStateUpdate", (state) => {
-            this.currentPlayer = state.currentPlayer;
-            this.board.loadStateFromServer(state);
-            this.updateTurnIndicator();
-        });
-
         // Error handling
         this.socket.on('invalidMove', (message) => {
             console.log(message);
@@ -622,6 +833,19 @@ class Game {
 
         this.board = new Board(this);
         this.start();
+
+        // In the Game class in index.js, update the socket handlers:
+        this.socket.on('gameStateUpdate', (state) => {
+            this.currentPlayer = state.currentPlayer;
+            this.board.loadStateFromServer(state);
+            this.updateTurnIndicator();
+        });
+
+        this.socket.on('sowSequence', ({ pitIndexes, player, nextPlayer }) => {
+            this.currentPlayer = nextPlayer; // Update current player
+            this.updateTurnIndicator();
+            this.board.animateSowSequence(pitIndexes, player, nextPlayer);
+        });
     }
 
     updateTurnIndicator() {
